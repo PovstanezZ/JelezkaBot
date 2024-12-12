@@ -1,34 +1,12 @@
-import telebot
-from telebot import types
-from threading import Timer
-import time
 import sqlite3
+import time
+from telebot import TeleBot, types
+from threading import Timer
 
-from DataBase.data_base_code import dbPath
-from cfg import *
+TOKEN = 'YOUR_BOT_TOKEN'
+bot = TeleBot(TOKEN)
 
-bot = API
-
-
-
-# Команда start
-@bot.message_handler(commands=["start"])
-def start_message(message):
-    bot.send_message(message.chat.id, "Приветствую, друг 👋\n"
-                                      "Я бот Железяка, приятно познакомиться! 😊\n"
-                                      "Я помогу тебе собрать компьютер исходя из той суммы которая у тебя есть.\n"
-                                      "Для того чтобы я смог это сделать, давай для начала познакомимся 😅\n"
-                                      "Для того чтобы я узнал тебя пропиши команду /register или выбери её из списка команд. 👇\n\n"
-                                      "Для более подробной информации по командам пропиши /help, или так же выбери её из списка 👇")
-
-
-# Команда help
-@bot.message_handler(commands=["help"])
-def help_message(message):
-    bot.send_message(message.chat.id, "Разберём команды:\n"
-                                      "/register - Познакомиться с ботом (регистрация)\n"
-                                      "/add_build - Начать сборку\n"
-                                      "/saved_builds - Сохранённые сборки")
+dbPath = r"D:\JelezkaBot\DataBase\PCBuild.db"
 
 # Локальные сборки
 user_builds = {}
@@ -58,11 +36,11 @@ def set_budget(message):
         keyboard.add(types.InlineKeyboardButton("Графика", callback_data="purpose_graphics"))
         keyboard.add(types.InlineKeyboardButton("Бюджет", callback_data="purpose_budget"))
         bot.send_message(chat_id, "Выберите назначение сборки:", reply_markup=keyboard)
-    except:
+    except ValueError:
         bot.send_message(message.chat.id, "Пожалуйста, укажите бюджет числом. Попробуйте снова:")
         bot.register_next_step_handler(message, set_budget)
 
-@bot.callback_query_handler(func=lambda callback: True)
+@bot.callback_query_handler(func=lambda callback: callback.data.startswith("purpose_"))
 def set_purpose(call):
     chat_id = call.message.chat.id
     purpose = call.data.split("_")[1]
@@ -159,3 +137,6 @@ def discard_build(call):
     if user_id in user_builds:
         del user_builds[user_id]
     bot.send_message(user_id, "Сборка удалена.")
+
+# Запуск бота
+bot.polling(none_stop=True)
