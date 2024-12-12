@@ -1,5 +1,5 @@
 from regestration import *
 from cfg import *
-from test import *
+from buttons import *
 
 bot.infinity_polling()
