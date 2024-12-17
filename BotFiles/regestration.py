@@ -8,18 +8,20 @@ bot = API
 
 
 def connect_db():
-    conn = sqlite3.connect(dbPath)
+    conn = sqlite3.connect(db_path)
     return conn
+
+
+from DataBase.data_base_code import db_path
 
 
 def create_users_table():
     """Создает таблицу users, если её еще нет."""
-    conn = sqlite3.connect(dbPath)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             telegram_id INTEGER PRIMARY KEY,
-            username TEXT,
             first_name TEXT,
             last_name TEXT
         )
@@ -31,16 +33,16 @@ def create_users_table():
 create_users_table()  # Убедимся, что таблица существует
 
 
-def register_user(telegram_id, username, first_name, last_name):
+def register_user(telegram_id, first_name, last_name):
     """Добавляет пользователя в базу данных, если он еще не зарегистрирован."""
-    conn = sqlite3.connect(dbPath)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     # Проверка на существование пользователя
     cursor.execute("SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,))
     if cursor.fetchone() is None:
         cursor.execute(
-            "INSERT INTO users (telegram_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
-            (telegram_id, username, first_name, last_name)
+            "INSERT INTO users (telegram_id, first_name, last_name) VALUES (?, ?, ?)",
+            (telegram_id, first_name, last_name)
         )
         conn.commit()
         return True  # Пользователь успешно зарегистрирован
@@ -57,7 +59,7 @@ def start_registration(message):
     first_name = message.from_user.first_name or "No first name"
     last_name = message.from_user.last_name or "No last name"
 
-    if register_user(user_id, username, first_name, last_name):
+    if register_user(user_id, first_name, last_name):
         keyboard_register = types.InlineKeyboardMarkup()
 
         # Кнопки
@@ -84,15 +86,15 @@ def start_registration(message):
                          reply_markup=keyboard_register)
 
 
-@bot.callback_query_handler(func=lambda callback: True)
-def response(callback):
-    if callback.data == "add_build":
-        try:
-            bot.send_message(callback.message.chat.id, "Вы нажали кнопку 'Создать сборку'!")
-        except:
-            return
-    elif callback.data == "saved_builds":
-        try:
-            bot.send_message(callback.message.chat.id, "Вы нажали кнопку 'Создать сборку'!")
-        except:
-            return
+# @bot.callback_query_handler(func=lambda callback: True)
+# def response(callback):
+#     if callback.data == "add_build":
+#         try:
+#             bot.send_message(callback.message.chat.id, "Вы нажали кнопку 'Создать сборку'!")
+#         except:
+#             return
+#     elif callback.data == "saved_builds":
+#         try:
+#             bot.send_message(callback.message.chat.id, "Вы нажали кнопку 'Создать сборку'!")
+#         except:
+#             return

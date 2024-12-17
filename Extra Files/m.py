@@ -6,40 +6,37 @@ import os
 from DataBase.data_base_code import db_path
 from cfg import *
 
-bot = API
-
-active_builds = {}
-
-# /////////////// #
-# -Команда start- #
-# /////////////// #
-
-@bot.message_handler(commands=["start"])
-def start_message(message):
-    bot.send_message(message.chat.id, "Приветствую, друг 👋\n"
-                                      "Я бот Железяка, приятно познакомиться! 😊\n"
-                                      "Я помогу тебе собрать компьютер исходя из той суммы которая у тебя есть.\n"
-                                      "Для того чтобы я смог это сделать, давай для начала познакомимся 😅\n"
-                                      "Для того чтобы я узнал тебя пропиши команду /register или выбери её из списка команд. 👇\n\n"
-                                      "Для более подробной информации по командам пропиши /help, или так же выбери её из списка 👇")
-
-# ////////////// #
-# -Команда help- #
-# ////////////// #
-
-@bot.message_handler(commands=["help"])
-def help_message(message):
-    bot.send_message(message.chat.id, "Разберём команды:\n"
-                                      "/register - Познакомиться с ботом (регистрация)\n"
-                                      "/add_build - Начать сборку\n"
-                                      "/saved_builds - Сохранённые сборки")
-
-
+# Токен вашего бота
+bot = telebot.TeleBot("YOUR_BOT_TOKEN")
 
 # Хранилище для текущих сборок пользователей
 user_sessions = {}
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu")
+# Регистрация пользователя
+@bot.message_handler(commands=['start', 'registration'])
+def register_user(message):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Проверка на существующего пользователя
+    cursor.execute("SELECT * FROM users WHERE telegram_id = ?", (message.from_user.id,))
+    user = cursor.fetchone()
+
+    if user:
+        bot.send_message(message.chat.id, "Вы уже зарегистрированы!")
+    else:
+        # Добавление нового пользователя
+        cursor.execute("INSERT INTO users (telegram_id, first_name, last_name) VALUES (?, ?, ?)", (
+            message.from_user.id,
+            message.from_user.first_name,
+            message.from_user.last_name or ""
+        ))
+        conn.commit()
+        bot.send_message(message.chat.id, "Вы успешно зарегистрированы!")
+
+    conn.close()
+    show_main_menu(message)
+
 # Главное меню
 def show_main_menu(message):
     markup = InlineKeyboardMarkup()
