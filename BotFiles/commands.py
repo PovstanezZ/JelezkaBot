@@ -1,4 +1,5 @@
 import telebot
+from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import sqlite3
 import os
@@ -9,6 +10,10 @@ from cfg import *
 bot = API
 
 active_builds = {}
+# Промежуточное состояние пользователя
+user_build_progress = {}
+user_budgets = {}  # Хранение бюджета пользователей
+
 
 # /////////////// #
 # -Команда start- #
@@ -36,238 +41,172 @@ def help_message(message):
 
 
 
-# Хранилище для текущих сборок пользователей
-user_sessions = {}
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu")
-# Главное меню
-def show_main_menu(message):
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Начать сборку", callback_data="start_build"))
-    markup.add(InlineKeyboardButton("Мои сборки", callback_data="view_builds"))
-    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=markup)
 
-# Начало сборки
-@bot.callback_query_handler(func=lambda call: call.data == "start_build")
-def start_build(call):
-    # Инициализация новой сессии сборки
-    user_sessions[call.message.chat.id] = {"budget": None, "usage": None, "components": {}}
-    bot.send_message(call.message.chat.id, "Введите ваш бюджет в рублях:")
-    bot.register_next_step_handler(call.message, get_budget)
-
-def get_budget(message):
-    try:
-        budget = int(message.text)
-        user_sessions[message.chat.id]["budget"] = budget
-        bot.send_message(message.chat.id, "Выберите назначение сборки:", reply_markup=get_usage_keyboard())
-    except ValueError:
-        bot.send_message(message.chat.id, "Пожалуйста, введите корректное число.")
-        bot.register_next_step_handler(message, get_budget)
-
-def get_usage_keyboard():
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("Игровые", callback_data="usage_gaming"),
-        InlineKeyboardButton("Для работы", callback_data="usage_work"),
-        InlineKeyboardButton("Бюджетные", callback_data="usage_budget"),
-        InlineKeyboardButton("Графика", callback_data="usage_graphics")
-    )
-    return markup
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("usage_"))
-def select_usage(call):
-    usage = call.data.split("_")[1]
-    user_sessions[call.message.chat.id]["usage"] = usage
-    ask_component(call.message, "cpus")
-
-# Дальше аналогично реализуйте выбор компонентов...
-def ask_component(message, component_type):
-    chat_id = message.chat.id
-    session = user_sessions.get(chat_id)
-    if not session:
-        bot.send_message(chat_id, "Сессия сборки не найдена. Пожалуйста, начните заново.")
-        return
-
-    # Получаем комплектующие из базы данных
+# Загрузка комплектующих из базы данных
+def get_components(component_type, max_price=None, compatibility=None):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    query = f"SELECT id, name, specs, price, compatibility FROM {component_type}"
+    params = []
 
-    # Фильтрация комплектующих по бюджету и назначению
-    budget = session["budget"]
-    usage = session["usage"]
-    query = f"""
-        SELECT id, name, specs, price 
-        FROM {component_type} 
-        WHERE category = ? AND price <= ?
-    """
-    cursor.execute(query, (usage, budget))
+    # Фильтрация по бюджету
+    if max_price:
+        query += " WHERE price <= ?"
+        params.append(max_price)
+
+    # Фильтрация по совместимости
+    if compatibility:
+        if "WHERE" in query:
+            query += " AND"
+        else:
+            query += " WHERE"
+        query += " compatibility LIKE ?"
+        params.append(f"%{compatibility}%")
+
+    cursor.execute(query, params)
     components = cursor.fetchall()
     conn.close()
+    return components
+
+# Команда для установки бюджета
+@bot.message_handler(commands=['set_budget'])
+def set_budget(message):
+    bot.send_message(message.chat.id, "Введите ваш бюджет (в рублях):")
+
+    def process_budget(msg):
+        if not msg.text.isdigit():
+            bot.send_message(msg.chat.id, "Пожалуйста, введите число!")
+            return
+        user_budgets[msg.chat.id] = int(msg.text)
+        bot.send_message(msg.chat.id, f"Ваш бюджет установлен: {msg.text} руб.")
+        start_build(msg)
+
+    bot.register_next_step_handler(message, process_budget)
+
+# Начало подбора сборки
+@bot.message_handler(commands=['start_build'])
+def start_build(message):
+    if message.chat.id not in user_budgets:
+        bot.send_message(message.chat.id, "Пожалуйста, сначала установите бюджет с помощью команды /set_budget.")
+        return
+
+    user_build_progress[message.chat.id] = {}
+    keyboard = types.InlineKeyboardMarkup()
+    buttons = [
+    types.InlineKeyboardButton(text="Процессор", callback_data="select_cpus"),
+    types.InlineKeyboardButton(text="Материнская плата", callback_data="select_mother_boards"),
+    types.InlineKeyboardButton(text="Видеокарта", callback_data="select_gpus"),
+    types.InlineKeyboardButton(text="Оперативная память", callback_data="select_rams"),
+    types.InlineKeyboardButton(text="Блок питания", callback_data="select_power_supplies"),
+    types.InlineKeyboardButton(text="Накопитель", callback_data="select_storages"),
+    types.InlineKeyboardButton(text="Корпус", callback_data="select_computer_cases")
+    ]
+    keyboard.add(*buttons)
+
+    bot.send_message(message.chat.id, "Выберите тип комплектующего:", reply_markup=keyboard)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_"))
+def select_component(call):
+    # Маппинг callback_data на имена таблиц в базе данных
+    component_map = {
+        "cpus": "cpus",
+        "mother_boards": "motherBoards",  # Убедитесь, что имя таблицы совпадает с этим ключом
+        "gpus": "gpus",
+        "rams": "rams",
+        "power_supplies": "powerSupplies",  # Имя таблицы совпадает
+        "storages": "storages",
+        "computer_cases": "computerCases"  # Имя таблицы совпадает
+    }
+
+    # Извлечение типа компонента из callback_data
+    component_type_key = call.data[len("select_"):]  # Получаем часть после "select_"
+    component_type = component_map.get(component_type_key)
+
+    if not component_type:
+        bot.answer_callback_query(call.id, f"Ошибка: неверный тип комплектующего ({component_type_key})!")
+        return
+
+    # Получение бюджета пользователя
+    max_price = user_budgets.get(call.message.chat.id)
+
+    # Совместимость для специфических комплектующих
+    compatibility = None
+    if component_type == "motherBoards":
+        # Совместимость с процессором
+        compatibility = user_build_progress[call.message.chat.id].get("cpus")
+    elif component_type == "rams":
+        # Совместимость с материнской платой
+        compatibility = user_build_progress[call.message.chat.id].get("motherBoards")
+
+    # Получение данных из базы
+    components = get_components(component_type, max_price, compatibility)
 
     if not components:
-        bot.send_message(chat_id, f"Нет доступных {component_type} для вашего бюджета и назначения.")
-        cancel_build(message)
+        bot.answer_callback_query(call.id, "Нет доступных комплектующих.")
         return
 
-    # Генерируем клавиатуру с вариантами
-    markup = InlineKeyboardMarkup()
-    for comp in components:
-        comp_id, name, specs, price = comp
-        markup.add(InlineKeyboardButton(f"{name} ({price} руб.)", callback_data=f"{component_type}_{comp_id}"))
+    # Создание клавиатуры
+    keyboard = InlineKeyboardMarkup()
+    for comp_id, name, specs, price, _ in components:
+        keyboard.add(InlineKeyboardButton(
+            text=f"{name} ({price} руб.) - {specs}",
+            callback_data=f"add_{component_type}_{comp_id}"
+        ))
 
-    # Добавляем кнопку отмены сборки
-    markup.add(InlineKeyboardButton("Отмена сборки", callback_data="cancel_build"))
-    bot.send_message(chat_id, f"Выберите {component_type}:", reply_markup=markup)
+    # Добавляем кнопку возврата в меню
+    keyboard.add(InlineKeyboardButton(text="Вернуться в меню", callback_data="return_to_menu"))
 
-# Обработка выбора компонента
-@bot.callback_query_handler(func=lambda call: "_" in call.data and call.data.split("_")[0] in [
-    "cpus", "mother_boards", "gpus", "rams", "power_supplies", "storages", "computer_case"])
-def select_component(call):
-    chat_id = call.message.chat.id
-    component_type, component_id = call.data.split("_")
-    session = user_sessions.get(chat_id)
-    if not session:
-        bot.send_message(chat_id, "Сессия сборки не найдена. Пожалуйста, начните заново.")
-        return
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.id,
+        text=f"Выберите {component_type_key} (можно использовать фильтрацию по бюджету):",
+        reply_markup=keyboard
+    )
 
-    # Сохраняем выбранный компонент в текущей сессии
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT name, specs, price FROM {component_type} WHERE id = ?", (component_id,))
-    component = cursor.fetchone()
-    conn.close()
 
-    if component:
-        session["components"][component_type] = {
-            "name": component[0],
-            "specs": component[1],
-            "price": component[2]
-        }
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_"))
+def add_to_build(call):
+    _, component_type, comp_id = call.data.split("_")
+    user_build_progress[call.message.chat.id][component_type] = comp_id
+    bot.answer_callback_query(call.id, f"{component_type.capitalize()} добавлен в сборку!")
+    bot.send_message(call.message.chat.id, f"{component_type.capitalize()} успешно добавлен.")
 
-        # Выбор следующего компонента
-        next_components = [
-            "cpus", "mother_boards", "gpus", "rams",
-            "power_supplies", "storages", "computer_case"
-        ]
-        current_index = next_components.index(component_type)
-        if current_index + 1 < len(next_components):
-            ask_component(call.message, next_components[current_index + 1])
-        else:
-            # Завершение сборки
-            finish_build(call.message)
+    # Проверка завершенности сборки
+    if len(user_build_progress[call.message.chat.id]) == 7:
+        save_build_to_db(call.message.chat.id)
+        bot.send_message(call.message.chat.id, "Сборка завершена и сохранена!")
     else:
-        bot.send_message(chat_id, "Ошибка при выборе компонента. Попробуйте снова.")
-def finish_build(message):
-    chat_id = message.chat.id
-    session = user_sessions.get(chat_id)
-    if not session:
-        bot.send_message(chat_id, "Сессия сборки не найдена. Пожалуйста, начните заново.")
-        return
+        start_build(call.message)
 
-    # Подсчитываем итоговую стоимость
-    total_price = sum(comp["price"] for comp in session["components"].values())
+@bot.callback_query_handler(func=lambda call: call.data == "return_to_menu")
+def return_to_menu(call):
+    start_build(call.message)
 
-    # Формируем итоговый список комплектующих
-    build_summary = "Сборка завершена!\n\nВыбранные комплектующие:\n"
-    for component_type, component in session["components"].items():
-        build_summary += f"{component_type.capitalize()}: {component['name']} ({component['price']} руб.)\n"
-
-    build_summary += f"\nИтоговая стоимость: {total_price} руб."
-
-    # Предлагаем сохранить сборку
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Сохранить сборку", callback_data="save_build"))
-    markup.add(InlineKeyboardButton("Отменить сборку", callback_data="cancel_build"))
-    bot.send_message(chat_id, build_summary, reply_markup=markup)
-
-# Сохранение сборки
-@bot.callback_query_handler(func=lambda call: call.data == "save_build")
-def save_build(call):
-    chat_id = call.message.chat.id
-    session = user_sessions.pop(chat_id, None)
-    if not session:
-        bot.send_message(chat_id, "Сессия сборки не найдена. Пожалуйста, начните заново.")
-        return
-
-    bot.send_message(chat_id, "Введите название для вашей сборки:")
-    bot.register_next_step_handler(call.message, save_build_name)
-
-def save_build_name(message):
-    chat_id = message.chat.id
-    build_name = message.text
-    session = user_sessions.pop(chat_id, None)
-    if not session:
-        bot.send_message(chat_id, "Сессия сборки не найдена. Пожалуйста, начните заново.")
-        return
-
+# Сохранение сборки в базу данных
+def save_build_to_db(user_id):
+    build = user_build_progress[user_id]
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO user_builds (telegram_id, build_name, cpu, motherboard, gpu, ram, power_supply, storage, computer_case)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO user_builds (telegram_id, cpu, motherboard, gpu, ram, power_supply, storage, computer_case)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        message.chat.id, build_name,
-        session["components"]["cpus"]["name"],
-        session["components"]["mother_boards"]["name"],
-        session["components"]["gpus"]["name"],
-        session["components"]["rams"]["name"],
-        session["components"]["power_supplies"]["name"],
-        session["components"]["storages"]["name"],
-        session["components"]["computer_case"]["name"]
+        user_id,
+        build.get("cpus"),
+        build.get("mother_boards"),
+        build.get("gpus"),
+        build.get("rams"),
+        build.get("power_supplies"),
+        build.get("storages"),
+        build.get("computer_cases")
     ))
     conn.commit()
     conn.close()
+    del user_build_progress[user_id]
+    bot.send_message(user_id, "Сборка успешно сохранена!")
 
-    bot.send_message(chat_id, f"Сборка '{build_name}' успешно сохранена!")
-@bot.message_handler(commands=['saved_builds'])
-def view_saved_builds(message):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, build_name FROM user_builds WHERE telegram_id = ?", (message.chat.id,))
-    builds = cursor.fetchall()
-    conn.close()
+# Запуск бота
+bot.polling()
 
-    if not builds:
-        bot.send_message(message.chat.id, "У вас нет сохранённых сборок.")
-        return
 
-    # Генерируем кнопки для просмотра сборок
-    markup = InlineKeyboardMarkup()
-    for build_id, build_name in builds:
-        markup.add(InlineKeyboardButton(build_name, callback_data=f"view_build_{build_id}"))
-    bot.send_message(message.chat.id, "Ваши сборки:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("view_build_"))
-def view_build(call):
-    build_id = int(call.data.split("_")[2])
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT build_name, cpu, motherboard, gpu, ram, power_supply, storage, computer_case 
-        FROM user_builds 
-        WHERE id = ?
-    """, (build_id,))
-    build = cursor.fetchone()
-    conn.close()
-
-    if not build:
-        bot.send_message(call.message.chat.id, "Сборка не найдена.")
-        return
-
-    build_name, cpu, motherboard, gpu, ram, power_supply, storage, computer_case = build
-    build_summary = (
-        f"Сборка: {build_name}\n"
-        f"Процессор: {cpu}\n"
-        f"Материнская плата: {motherboard}\n"
-        f"Видеокарта: {gpu}\n"
-        f"Оперативная память: {ram}\n"
-        f"Блок питания: {power_supply}\n"
-        f"Накопитель: {storage}\n"
-        f"Корпус: {computer_case}"
-    )
-    bot.send_message(call.message.chat.id, build_summary)
-@bot.callback_query_handler(func=lambda call: call.data == "cancel_build")
-def cancel_build(call):
-    chat_id = call.message.chat.id
-    user_sessions.pop(chat_id, None)
-    bot.send_message(chat_id, "Сборка отменена.")

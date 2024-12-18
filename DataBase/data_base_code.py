@@ -20,8 +20,8 @@ def init_db():
 
     # Таблицы комплектующих
     component_types = [
-        "cpus", "mother_boards", "gpus", "rams",
-        "power_supplies", "storages", "computer_cases"
+        "cpus", "motherBoards", "gpus", "rams",
+        "powerSupplies", "storages", "computerCases"
     ]
     for component in component_types:
         cursor.execute(f"""
@@ -172,7 +172,7 @@ def fill_db():
     else:
         print("Данные видях уже существуют в базе данных, пропуск вставки.")
 
-    cursor.execute("SELECT COUNT(*) FROM mother_boards")
+    cursor.execute("SELECT COUNT(*) FROM motherBoards")
     cpu_count = cursor.fetchone()[0]
     if cpu_count == 0:
         mother_boards = [
@@ -224,7 +224,7 @@ def fill_db():
             ("Gigabyte TRX40 AORUS XTREME", "Графика", "sTRX4, AMD TRX40, E-ATX, 16-phase VRM", 60000),
             ("ASRock TRX40 Taichi", "Графика", "sTRX4, AMD TRX40, ATX, 12-phase VRM", 30000)
         ]
-        cursor.executemany("INSERT INTO mother_boards (name, category, specs, price) VALUES (?, ?, ?, ?)", mother_boards)
+        cursor.executemany("INSERT INTO motherBoards (name, category, specs, price) VALUES (?, ?, ?, ?)", mother_boards)
         print("Материнские платы успешно добавлены в базу данных!")
     else:
         print("мать есть")
@@ -286,7 +286,7 @@ def fill_db():
     else:
         print("Ram est, ne trogat")
 
-    cursor.execute("SELECT COUNT(*) FROM power_supplies")
+    cursor.execute("SELECT COUNT(*) FROM powerSupplies")
     cpu_count = cursor.fetchone()[0]
     if cpu_count == 0:
         power_supplies = [
@@ -338,7 +338,7 @@ def fill_db():
         ("Corsair HX1200i", "Графика", "1200W, 80+ Platinum, Fully Modular, ATX", 20000),
         ("Be Quiet! Dark Power Pro 12 1200W", "Графика", "1200W, 80+ Titanium, Fully Modular, ATX", 25000)
     ]
-        cursor.executemany("INSERT INTO power_supplies (name, category, specs, price) VALUES (?, ?, ?, ?)", power_supplies)
+        cursor.executemany("INSERT INTO powerSupplies (name, category, specs, price) VALUES (?, ?, ?, ?)", power_supplies)
         print("Блоки питания успешно добавлены в базу данных!")
     else:
         print("bloki pitaniya est")
@@ -412,7 +412,7 @@ def fill_db():
     else:
         print("ssd yest")
 
-    cursor.execute("SELECT COUNT(*) FROM computer_cases")
+    cursor.execute("SELECT COUNT(*) FROM computerCases")
     cpu_count = cursor.fetchone()[0]
     if cpu_count == 0:
         computer_cases = [
@@ -476,7 +476,7 @@ def fill_db():
             ("SilverStone SST-SJ08", "Ультракомпактные", "Mini Tower, ITX, Компактный, 1x вентилятор", 4500),
             ("InWin 301", "Ультракомпактные", "Mid Tower, ATX, Стеклянная панель, 2x вентиляторов", 6500)
         ]
-        cursor.executemany("INSERT INTO computer_cases (name, category, specs, price) VALUES (?, ?, ?, ?)", computer_cases)
+        cursor.executemany("INSERT INTO computerCases (name, category, specs, price) VALUES (?, ?, ?, ?)", computer_cases)
         print("Корпуса успешно добавлены в базу данных!")
     else:
         print("keysi yest")
